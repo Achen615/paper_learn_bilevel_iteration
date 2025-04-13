@@ -104,13 +104,10 @@ def market_clearing(a, b, M, generators, consumers, lines, nodes):
     # 参考节点相角
     model.ref = pyo.Constraint(expr=model.delta[ref_node] == 0)
     
-    # 选择求解器
-    solver = pyo.SolverFactory('gurobi')
-    # 配置Gurobi参数
-    solver.options['NonConvex'] = 2  # 允许非凸模型
     # 求解
+    solver = pyo.SolverFactory('gurobi')
+    solver.options['NonConvex'] = 2
     results = solver.solve(model)
-    
     # 提取结果
     P_G = {i: pyo.value(model.P_G[i]) for i in generators}
     P_D = {j: pyo.value(model.P_D[j]) for j in consumers}
@@ -124,22 +121,22 @@ def generator_optimize(gen_id, a_current, b_current, M, generators, consumers):
     gen = generators[gen_id]
     model = pyo.ConcreteModel()
     
-    # 决策变量: 该发电商机组报价
+    # 决策变量: 机组报价
     model.a = pyo.Var(within=pyo.NonNegativeReals)
     
-    # 报价约束 (边际成本的±20%)
+    # 报价约束
     model.a_lb = pyo.Constraint(expr=model.a >= 0.8 * gen['marginal_cost'])
     model.a_ub = pyo.Constraint(expr=model.a <= 1.2 * gen['marginal_cost'])
     
     # 固定其他参与者报价
     a_new = a_current.copy()
     
-    # 定义目标函数
+    # 目标函数
     def objective(model):
         a_new[gen_id] = model.a
         P_G, P_D, lambda_n, omega = market_clearing(a_new, b_current, M, generators, consumers, lines, nodes)
         
-        # 计算该发电商收益
+        # 计算发电商收益
         revenue = lambda_n[gen['node']] * P_G[gen_id]  # 电能收益
         carbon_profit = omega * (gen['E0'] - gen['c'] * P_G[gen_id])  # 碳交易收益
         cost = gen['marginal_cost'] * P_G[gen_id]     # 发电成本
@@ -160,10 +157,10 @@ def consumer_optimize(cons_id, a_current, b_current, M, generators, consumers):
     cons = consumers[cons_id]
     model = pyo.ConcreteModel()
     
-    # 决策变量: 该用户报价
+    # 决策变量: 用户报价
     model.b = pyo.Var(within=pyo.NonNegativeReals)
     
-    # 报价约束 (边际效用的±20%)
+    # 报价约束
     model.b_lb = pyo.Constraint(expr=model.b >= 0.8 * cons['marginal_utility'])
     model.b_ub = pyo.Constraint(expr=model.b <= 1.2 * cons['marginal_utility'])
     
@@ -175,7 +172,7 @@ def consumer_optimize(cons_id, a_current, b_current, M, generators, consumers):
         b_new[cons_id] = model.b
         P_G, P_D, lambda_n, omega = market_clearing(a_current, b_new, M, generators, consumers, lines, nodes)
         
-        # 计算该用户效用
+        # 计算用户效用
         utility = cons['marginal_utility'] * P_D[cons_id]  # 用电效用
         cost = lambda_n[cons['node']] * P_D[cons_id]       # 购电成本
         total_utility = utility - cost
@@ -206,13 +203,13 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
             best_a = a[gen_id]
             best_profit = -float('inf')
             
-            # 定义报价搜索范围（示例：分10个点）
+            # 定义报价搜索范围
             a_min = 0.8 * generators[gen_id]['marginal_cost']
             a_max = 1.2 * generators[gen_id]['marginal_cost']
             a_candidates = np.linspace(a_min, a_max, 10)
             
             for a_candidate in a_candidates:
-                # 临时更新报价
+                # 更新报价
                 a_temp = a.copy()
                 a_temp[gen_id] = a_candidate
                 
@@ -224,7 +221,7 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
                 except:
                     continue  # 忽略求解失败的情况
                 
-                # 计算当前发电商收益
+                # 计算当前收益
                 revenue = lambda_n[generators[gen_id]['node']] * P_G[gen_id]
                 carbon_profit = omega * (generators[gen_id]['E0'] - generators[gen_id]['c'] * P_G[gen_id])
                 cost = generators[gen_id]['marginal_cost'] * P_G[gen_id]
@@ -234,10 +231,7 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
                 if profit > best_profit:
                     best_profit = profit
                     best_a = a_candidate
-            
             a[gen_id] = best_a  # 更新报价
-            
-            #a[gen_id] = generator_optimize(gen_id, a, b, M, generators, consumers)
         
         # 用户优化阶段
         for cons_id in consumers:
@@ -245,13 +239,13 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
             best_b = b[cons_id]
             best_utility = -float('inf')
             
-            # 定义报价搜索范围（示例：分10个点）
+            # 定义报价搜索范围
             b_min = 0.8 * consumers[cons_id]['marginal_utility']
             b_max = 1.2 * consumers[cons_id]['marginal_utility']
             b_candidates = np.linspace(b_min, b_max, 10)
             
             for b_candidate in b_candidates:
-                # 临时更新报价
+                # 更新报价
                 b_temp = b.copy()
                 b_temp[cons_id] = b_candidate
                 
@@ -263,7 +257,7 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
                 except:
                     continue  # 忽略求解失败的情况
                 
-                # 计算该用户效用
+                # 计算用户效用
                 utility = consumers[cons_id]['marginal_utility'] * P_D[cons_id]  # 用电效用
                 cost = lambda_n[consumers[cons_id]['node']] * P_D[cons_id]       # 购电成本
                 total_utility = utility - cost
@@ -274,12 +268,9 @@ def diagonalized_iteration(M, generators, consumers, max_iter=20, tol=1e-3):
             
             b[cons_id] = best_b  # 更新报价
             
-            #b[cons_id] = consumer_optimize(cons_id, a, b, M, generators, consumers)
-        
-        # 检查收敛
+        # 判断是否收敛
         a_diff = max(abs(a[i]-a_old[i]) for i in generators)
         b_diff = max(abs(b[j]-b_old[j]) for j in consumers)
-        
         print(f"Iter {iter+1}: a_diff={a_diff:.4f}, b_diff={b_diff:.4f}")
         if a_diff < tol and b_diff < tol:
             break
@@ -300,7 +291,7 @@ if __name__ == "__main__":
         '45%': 0.45 * total_emission_unlimited
     }
     
-    # 运行各场景
+    # 各场景求解
     for scenario, M in scenarios.items():
         print(f"\n========== Scenario: {scenario} ==========")
         a, b, P_G, P_D, lambda_n, omega = diagonalized_iteration(M, generators, consumers)
